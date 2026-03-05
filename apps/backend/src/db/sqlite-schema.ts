@@ -428,6 +428,7 @@ export const storyVersion = sqliteTable(
 		createdAt: integer('created_at', { mode: 'timestamp_ms' })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 			.notNull(),
+		archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
 	},
 	(t) => [
 		index('story_version_chat_story_idx').on(t.chatId, t.storyId),

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, max, sql } from 'drizzle-orm';
 
 import s, { type DBStoryVersion } from '../db/abstractSchema';
 import { db } from '../db/db';
@@ -54,22 +54,25 @@ export async function listStoriesInChat(
 			storyId: s.storyVersion.storyId,
 			title: s.storyVersion.title,
 			version: s.storyVersion.version,
+			archivedAt: s.storyVersion.archivedAt,
 		})
 		.from(s.storyVersion)
 		.where(eq(s.storyVersion.chatId, chatId))
 		.orderBy(asc(s.storyVersion.version))
 		.execute();
 
-	const latest = new Map<string, { title: string; version: number }>();
+	const latest = new Map<string, { title: string; version: number; archived: boolean }>();
 	for (const row of rows) {
-		latest.set(row.storyId, { title: row.title, version: row.version });
+		latest.set(row.storyId, { title: row.title, version: row.version, archived: row.archivedAt !== null });
 	}
 
-	return [...latest.entries()].map(([storyId, { title, version }]) => ({
-		storyId,
-		title,
-		latestVersion: version,
-	}));
+	return [...latest.entries()]
+		.filter(([_, { archived }]) => !archived)
+		.map(([storyId, { title, version }]) => ({
+			storyId,
+			title,
+			latestVersion: version,
+		}));
 }
 
 export async function listUserStories(
@@ -104,6 +107,59 @@ export async function listUserStories(
 				eq(s.storyVersion.version, latestVersions.maxVersion),
 			),
 		)
+		.where(isNull(s.storyVersion.archivedAt))
 		.orderBy(desc(s.storyVersion.createdAt))
 		.execute();
+}
+
+export async function listArchivedStories(
+	userId: string,
+): Promise<{ storyId: string; chatId: string; title: string; code: string; createdAt: Date; archivedAt: Date }[]> {
+	const latestVersions = db
+		.select({
+			chatId: s.storyVersion.chatId,
+			storyId: s.storyVersion.storyId,
+			maxVersion: max(s.storyVersion.version).as('max_version'),
+		})
+		.from(s.storyVersion)
+		.innerJoin(s.chat, eq(s.storyVersion.chatId, s.chat.id))
+		.where(eq(s.chat.userId, userId))
+		.groupBy(s.storyVersion.chatId, s.storyVersion.storyId)
+		.as('latest');
+
+	return db
+		.select({
+			storyId: s.storyVersion.storyId,
+			chatId: s.storyVersion.chatId,
+			title: s.storyVersion.title,
+			code: s.storyVersion.code,
+			createdAt: s.storyVersion.createdAt,
+			archivedAt: s.storyVersion.archivedAt,
+		})
+		.from(s.storyVersion)
+		.innerJoin(
+			latestVersions,
+			and(
+				eq(s.storyVersion.chatId, latestVersions.chatId),
+				eq(s.storyVersion.storyId, latestVersions.storyId),
+				eq(s.storyVersion.version, latestVersions.maxVersion),
+			),
+		)
+		.where(isNotNull(s.storyVersion.archivedAt))
+		.orderBy(desc(s.storyVersion.archivedAt))
+		.execute() as Promise<
+		{ storyId: string; chatId: string; title: string; code: string; createdAt: Date; archivedAt: Date }[]
+	>;
+}
+
+export async function setStoryArchived(chatId: string, storyId: string, archived: boolean): Promise<DBStoryVersion> {
+	const [story] = await db
+		.update(s.storyVersion)
+		.set({
+			archivedAt: archived ? new Date() : null,
+		})
+		.where(and(eq(s.storyVersion.chatId, chatId), eq(s.storyVersion.storyId, storyId)))
+		.returning();
+
+	return story;
 }

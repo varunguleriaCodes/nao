@@ -1,12 +1,26 @@
 import { Link } from '@tanstack/react-router';
+import { Archive, ArchiveRestore } from 'lucide-react';
+import { Button } from './ui/button';
 import type { ReactNode } from 'react';
-import type { DisplayMode, StoryGroup, StoryItem } from '@/lib/stories-page';
+import type { DisplayMode, StoryGroup, StoryItem, StoryArchiveState } from '@/lib/stories-page';
 import { StoryThumbnail } from '@/components/story-thumbnail';
 import StoryIcon from '@/components/ui/story-icon';
 import { formatRelativeDate } from '@/lib/time-ago';
 import { cn } from '@/lib/utils';
 
-export function StoriesGroups({ groups, displayMode }: { groups: StoryGroup[]; displayMode: DisplayMode }) {
+export function StoriesGroups({
+	groups,
+	displayMode,
+	onArchive,
+	isArchiving,
+	archiveState,
+}: {
+	groups: StoryGroup[];
+	displayMode: DisplayMode;
+	onArchive: (e: React.MouseEvent, item: StoryItem, currentArchiveState: StoryArchiveState) => Promise<void>;
+	isArchiving: boolean;
+	archiveState: StoryArchiveState;
+}) {
 	return (
 		<>
 			{groups.map((group, index) => (
@@ -18,7 +32,13 @@ export function StoriesGroups({ groups, displayMode }: { groups: StoryGroup[]; d
 					<StoriesList displayMode={displayMode}>
 						{group.items.map((item) => (
 							<Link key={item.id} {...item.link} className={storyCardClass(displayMode)}>
-								<StoryCardContent item={item} displayMode={displayMode} />
+								<StoryCardContent
+									item={item}
+									displayMode={displayMode}
+									onArchive={onArchive}
+									isArchiving={isArchiving}
+									archiveState={archiveState}
+								/>
 							</Link>
 						))}
 					</StoriesList>
@@ -36,13 +56,16 @@ export function StoriesNoResults({ query }: { query: string }) {
 	);
 }
 
-export function StoriesEmptyState() {
+export function StoriesEmptyState({ archiveState }: { archiveState?: StoryArchiveState }) {
+	const isArchived = archiveState === 'archived';
 	return (
 		<div className='flex flex-col items-center justify-center py-24 text-center'>
 			<StoryIcon className='size-10 text-muted-foreground/40 mb-4' />
-			<p className='text-muted-foreground text-sm'>No stories yet.</p>
+			<p className='text-muted-foreground text-sm'>{isArchived ? 'No archived stories.' : 'No stories yet.'}</p>
 			<p className='text-muted-foreground/60 text-sm mt-1'>
-				Stories will appear here as they are created in your chats.
+				{isArchived
+					? 'Archived stories will appear here.'
+					: 'Stories will appear here as they are created in your chats.'}
 			</p>
 		</div>
 	);
@@ -78,7 +101,19 @@ function storyCardClass(displayMode: DisplayMode) {
 	);
 }
 
-function StoryCardContent({ item, displayMode }: { item: StoryItem; displayMode: DisplayMode }) {
+function StoryCardContent({
+	item,
+	displayMode,
+	onArchive,
+	isArchiving,
+	archiveState,
+}: {
+	item: StoryItem;
+	displayMode: DisplayMode;
+	onArchive: (e: React.MouseEvent, item: StoryItem, currentArchiveState: StoryArchiveState) => Promise<void>;
+	isArchiving: boolean;
+	archiveState: StoryArchiveState;
+}) {
 	const meta = `${item.author} · ${formatRelativeDate(item.createdAt)}`;
 
 	if (displayMode === 'lines') {
@@ -96,7 +131,23 @@ function StoryCardContent({ item, displayMode }: { item: StoryItem; displayMode:
 				<StoryThumbnail summary={item.summary} />
 			</div>
 			<div className='absolute inset-x-0 -bottom-2 bg-gradient-to-t from-background from-45% to-transparent px-3 pb-5 pt-8 transition-transform duration-200 ease-out group-hover:-translate-y-1'>
-				<span className='text-sm font-medium leading-snug line-clamp-2'>{item.title}</span>
+				<div className='flex items-start gap-2'>
+					<span className='text-sm font-medium leading-snug line-clamp-2 flex-1'>{item.title}</span>
+
+					<Button
+						variant='ghost'
+						size='icon-md'
+						className='text-muted-foreground shrink-0'
+						onClick={(e) => onArchive(e, item, archiveState)}
+						disabled={isArchiving}
+					>
+						{archiveState === 'archived' ? (
+							<ArchiveRestore className='size-4' />
+						) : (
+							<Archive className='size-4' />
+						)}
+					</Button>
+				</div>
 				<span className='block text-[11px] text-muted-foreground mt-0.5 truncate'>{meta}</span>
 			</div>
 		</>

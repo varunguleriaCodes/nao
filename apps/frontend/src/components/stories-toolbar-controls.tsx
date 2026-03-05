@@ -1,7 +1,7 @@
-import { LayoutGrid, List, Search, X } from 'lucide-react';
+import { LayoutGrid, List, Search, X, Archive, ArchiveRestore } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import type { DisplayMode, GroupBy } from '@/lib/stories-page';
+import type { DisplayMode, GroupBy, StoryArchiveState } from '@/lib/stories-page';
 import { GROUP_BY_LABELS } from '@/lib/stories-page';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,9 @@ export function StoriesToolbarControls({
 	onGroupByChange,
 	displayMode,
 	onDisplayModeChange,
+	archiveState,
+	onArchiveStateChange,
+	isEmpty,
 }: {
 	searchQuery: string;
 	onSearchQueryChange: (value: string) => void;
@@ -21,12 +24,16 @@ export function StoriesToolbarControls({
 	onGroupByChange: (value: GroupBy) => void;
 	displayMode: DisplayMode;
 	onDisplayModeChange: (value: DisplayMode) => void;
+	archiveState: StoryArchiveState;
+	onArchiveStateChange: (value: StoryArchiveState) => void;
+	isEmpty?: boolean;
 }) {
 	return (
 		<div className='flex items-center gap-1'>
-			<SearchInput value={searchQuery} onChange={onSearchQueryChange} />
-			<GroupBySelect value={groupBy} onChange={onGroupByChange} />
-			<DisplayModeToggle value={displayMode} onChange={onDisplayModeChange} />
+			{!isEmpty && <SearchInput value={searchQuery} onChange={onSearchQueryChange} />}
+			{!isEmpty && <GroupBySelect value={groupBy} onChange={onGroupByChange} />}
+			{!isEmpty && <DisplayModeToggle value={displayMode} onChange={onDisplayModeChange} />}
+			<StoryArchiveType value={archiveState} onChange={onArchiveStateChange} />
 		</div>
 	);
 }
@@ -117,6 +124,37 @@ function DisplayModeToggle({ value, onChange }: { value: DisplayMode; onChange: 
 				aria-label='List view'
 			>
 				<List />
+			</Button>
+		</div>
+	);
+}
+
+function StoryArchiveType({
+	value,
+	onChange,
+}: {
+	value: StoryArchiveState;
+	onChange: (value: StoryArchiveState) => void;
+}) {
+	return (
+		<div className='flex items-center gap-0.5 rounded-md border p-0.5'>
+			<Button
+				variant={value === 'unarchived' ? 'ghost' : 'ghost-muted'}
+				size='icon-xs'
+				onClick={() => onChange('unarchived')}
+				className={cn(value === 'unarchived' && 'bg-accent')}
+				aria-label='Unarchived view'
+			>
+				<ArchiveRestore />
+			</Button>
+			<Button
+				variant={value === 'archived' ? 'ghost' : 'ghost-muted'}
+				size='icon-xs'
+				onClick={() => onChange('archived')}
+				className={cn(value === 'archived' && 'bg-accent')}
+				aria-label='Archived view'
+			>
+				<Archive />
 			</Button>
 		</div>
 	);
