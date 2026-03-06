@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
+import yaml
 from cyclopts import Parameter
 
 from nao_core.config import NaoConfig
@@ -32,6 +33,23 @@ class CreatedFile:
     content: str | None
 
 
+def _extract_project_name_from_file(config_file: Path) -> str | None:
+    """Try to extract project_name from an invalid config file.
+
+    Returns None if the project_name field cannot be found or read.
+    """
+    try:
+        with config_file.open("r") as f:
+            content = yaml.safe_load(f)
+            if isinstance(content, dict) and "project_name" in content:
+                project_name = content["project_name"]
+                if isinstance(project_name, str) and project_name.strip():
+                    return project_name.strip()
+    except Exception:
+        pass
+    return None
+
+
 def setup_project_name(force: bool = False) -> tuple[str, Path, NaoConfig | None]:
     """Setup the project name. Returns existing config if found and user wants to extend."""
     # Check if we're in a directory with an existing nao_config.yaml
@@ -47,6 +65,21 @@ def setup_project_name(force: bool = False) -> tuple[str, Path, NaoConfig | None
 
             if force or ask_confirm("Update this project configuration?", default=True):
                 return existing_config.project_name, current_dir, existing_config
+            else:
+                raise InitError("Initialization cancelled.")
+        else:
+            # Config file exists but is invalid
+            UI.title("Found invalid nao_config.yaml")
+            UI.print("[yellow]The existing configuration file has errors and couldn't be loaded.[/yellow]\n")
+
+            if force or ask_confirm("Fix this project configuration?", default=True):
+                # Extract project name from the invalid config
+                project_name = _extract_project_name_from_file(config_file)
+                if not project_name:
+                    project_name = ask_text("Enter your project name:", required_field=True)
+                    if not project_name:
+                        raise EmptyProjectNameError()
+                return project_name, current_dir, None
             else:
                 raise InitError("Initialization cancelled.")
 
