@@ -18,6 +18,15 @@ export const storyRoutes = {
 		}));
 	}),
 
+	listArchived: protectedProcedure.query(async ({ ctx }) => {
+		const stories = await storyQueries.listArchivedStories(ctx.user.id);
+		return stories.map(({ code, archivedAt, ...rest }) => ({
+			...rest,
+			archivedAt,
+			summary: extractStorySummary(code),
+		}));
+	}),
+
 	getLatest: chatOwnerProcedure
 		.input(z.object({ chatId: z.string(), storyId: z.string() }))
 		.query(async ({ input }) => {
@@ -54,5 +63,16 @@ export const storyRoutes = {
 				...input,
 				source: 'user',
 			});
+		}),
+	archive: chatOwnerProcedure
+		.input(
+			z.object({
+				chatId: z.string(),
+				storyId: z.string(),
+				archived: z.boolean(),
+			}),
+		)
+		.mutation(async ({ input }) => {
+			return storyQueries.setStoryArchived(input.chatId, input.storyId, input.archived);
 		}),
 };

@@ -403,6 +403,7 @@ export const storyVersion = pgTable(
 		action: text('action', { enum: STORY_ACTIONS }).notNull(),
 		source: text('source', { enum: STORY_SOURCES }).notNull(),
 		createdAt: timestamp('created_at').defaultNow().notNull(),
+		archivedAt: timestamp('archived_at'),
 	},
 	(t) => [
 		index('story_version_chat_story_idx').on(t.chatId, t.storyId),
