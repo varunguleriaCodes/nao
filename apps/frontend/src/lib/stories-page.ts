@@ -2,10 +2,10 @@ import type { StorySummary, SummarySegment } from '@/components/story-thumbnail'
 
 export type DisplayMode = 'grid' | 'lines';
 export type GroupBy = 'ownership' | 'date' | 'user';
-
+export type StoryArchiveState = 'archived' | 'unarchived';
 export const STORIES_DISPLAY_KEY = 'stories-display-mode';
 export const STORIES_GROUP_KEY = 'stories-group-by';
-
+export const STORIES_ARCHIVE_KEY = 'unarchived';
 export const GROUP_BY_LABELS: Record<GroupBy, string> = {
 	ownership: 'Ownership',
 	date: 'Date',
