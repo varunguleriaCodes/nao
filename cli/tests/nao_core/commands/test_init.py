@@ -9,10 +9,10 @@ from nao_core.commands.init import (
     CreatedFile,
     EmptyProjectNameError,
     ProjectExistsError,
-    _extract_project_name_from_file,
     create_empty_structure,
     setup_project_name,
 )
+from nao_core.config import NaoConfigError
 from nao_core.config.exceptions import InitError
 
 
@@ -35,72 +35,6 @@ class TestExceptions:
         """All custom exceptions inherit from InitError."""
         assert isinstance(EmptyProjectNameError(), InitError)
         assert isinstance(ProjectExistsError("test"), InitError)
-
-
-class TestExtractProjectNameFromFile:
-    """Tests for _extract_project_name_from_file helper function."""
-
-    def test_extracts_valid_project_name(self, tmp_path: Path):
-        """Extracts project_name from valid YAML."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("project_name: my-project\nother_field: value\n")
-
-        result = _extract_project_name_from_file(config_file)
-
-        assert result == "my-project"
-
-    def test_returns_none_for_missing_project_name(self, tmp_path: Path):
-        """Returns None when project_name field is missing."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("other_field: value\n")
-
-        result = _extract_project_name_from_file(config_file)
-
-        assert result is None
-
-    def test_returns_none_for_invalid_yaml(self, tmp_path: Path):
-        """Returns None when YAML is invalid."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("invalid: yaml: syntax:\n")
-
-        result = _extract_project_name_from_file(config_file)
-
-        assert result is None
-
-    def test_returns_none_for_empty_project_name(self, tmp_path: Path):
-        """Returns None when project_name is empty string."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("project_name: ''\n")
-
-        result = _extract_project_name_from_file(config_file)
-
-        assert result is None
-
-    def test_strips_whitespace_from_project_name(self, tmp_path: Path):
-        """Strips leading/trailing whitespace from project_name."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("project_name: '  my-project  '\n")
-
-        result = _extract_project_name_from_file(config_file)
-
-        assert result == "my-project"
-
-    def test_returns_none_for_non_string_project_name(self, tmp_path: Path):
-        """Returns None when project_name is not a string."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("project_name: 123\n")
-
-        result = _extract_project_name_from_file(config_file)
-
-        assert result is None
-
-    def test_returns_none_when_file_not_exists(self, tmp_path: Path):
-        """Returns None when file doesn't exist."""
-        config_file = tmp_path / "nonexistent.yaml"
-
-        result = _extract_project_name_from_file(config_file)
-
-        assert result is None
 
 
 class TestCreatedFile:
@@ -275,75 +209,22 @@ class TestSetupProjectName:
 
         assert "cancelled" in str(exc_info.value).lower()
 
-    @patch("nao_core.commands.init.ask_text")
     @patch("nao_core.commands.init.ask_confirm")
     @patch("nao_core.commands.init.NaoConfig.try_load")
-    def test_handles_invalid_config_file(self, mock_try_load, mock_confirm, mock_ask_text, tmp_path: Path, monkeypatch):
-        """Handles invalid config file by prompting to fix it."""
+    def test_fails_fast_on_invalid_config_file(self, mock_try_load, mock_confirm, tmp_path: Path, monkeypatch):
+        """Raises InitError when existing config is invalid."""
         monkeypatch.chdir(tmp_path)
 
         # Create invalid config file (missing required fields)
         (tmp_path / "nao_config.yaml").write_text("invalid: yaml\nwithout: project_name\n")
 
-        mock_try_load.return_value = None  # Simulates invalid config
-        mock_confirm.return_value = True
-        mock_ask_text.return_value = "fixed-project"
-
-        name, path, existing = setup_project_name()
-
-        assert name == "fixed-project"
-        assert path == tmp_path
-        assert existing is None
-        mock_confirm.assert_called_once()
-
-    @patch("nao_core.commands.init.ask_confirm")
-    @patch("nao_core.commands.init.NaoConfig.try_load")
-    def test_cancels_when_user_declines_fixing_invalid_config(self, mock_try_load, mock_confirm, tmp_path: Path, monkeypatch):
-        """Raises InitError when user declines fixing invalid config."""
-        monkeypatch.chdir(tmp_path)
-
-        (tmp_path / "nao_config.yaml").write_text("invalid: config\n")
-
-        mock_try_load.return_value = None
-        mock_confirm.return_value = False
+        mock_try_load.side_effect = NaoConfigError("Failed to load nao_config.yaml: validation error")
 
         with pytest.raises(InitError) as exc_info:
             setup_project_name()
 
-        assert "cancelled" in str(exc_info.value).lower()
-
-    @patch("nao_core.commands.init.ask_confirm")
-    @patch("nao_core.commands.init.NaoConfig.try_load")
-    def test_extracts_project_name_from_invalid_config(self, mock_try_load, mock_confirm, tmp_path: Path, monkeypatch):
-        """Extracts project_name from invalid config when possible."""
-        monkeypatch.chdir(tmp_path)
-
-        # Create config with valid project_name but other errors
-        (tmp_path / "nao_config.yaml").write_text("project_name: extracted-name\ninvalid_field: bad_value\n")
-
-        mock_try_load.return_value = None
-        mock_confirm.return_value = True
-
-        name, path, existing = setup_project_name()
-
-        assert name == "extracted-name"
-        assert path == tmp_path
-        assert existing is None
-
-    @patch("nao_core.commands.init.NaoConfig.try_load")
-    def test_allows_force_flag_with_invalid_config(self, mock_try_load, tmp_path: Path, monkeypatch):
-        """Force flag bypasses confirmation for invalid config."""
-        monkeypatch.chdir(tmp_path)
-
-        (tmp_path / "nao_config.yaml").write_text("project_name: forced\nbad: config\n")
-
-        mock_try_load.return_value = None
-
-        name, path, existing = setup_project_name(force=True)
-
-        assert name == "forced"
-        assert path == tmp_path
-        assert existing is None
+        assert "invalid nao_config.yaml" in str(exc_info.value)
+        mock_confirm.assert_not_called()
 
 
 class TestNaoConfigPromptDatabases:
@@ -723,15 +604,15 @@ class TestInitCommand:
     @patch("nao_core.commands.init.setup_project_name")
     @patch("nao_core.commands.init.UI")
     def test_init_handles_init_error(self, mock_ui, mock_setup_project_name):
-        """Init command handles InitError gracefully."""
+        """Init command prints error and exits non-zero on InitError."""
         from nao_core.commands.init import init
 
         mock_setup_project_name.side_effect = EmptyProjectNameError()
 
-        # Should not raise, just print error
-        init()
+        with pytest.raises(SystemExit) as exc_info:
+            init()
 
-        # Verify error was printed
+        assert exc_info.value.code == 1
         mock_ui.error.assert_called()
         calls = [str(c) for c in mock_ui.error.call_args_list]
         assert any("cannot be empty" in c for c in calls)

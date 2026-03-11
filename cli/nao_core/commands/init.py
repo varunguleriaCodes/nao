@@ -3,10 +3,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
-import yaml
 from cyclopts import Parameter
 
-from nao_core.config import NaoConfig
+from nao_core.config import NaoConfig, NaoConfigError
 from nao_core.config.exceptions import InitError
 from nao_core.tracking import track_command
 from nao_core.ui import UI, ask_confirm, ask_text
@@ -33,23 +32,6 @@ class CreatedFile:
     content: str | None
 
 
-def _extract_project_name_from_file(config_file: Path) -> str | None:
-    """Try to extract project_name from an invalid config file.
-
-    Returns None if the project_name field cannot be found or read.
-    """
-    try:
-        with config_file.open("r") as f:
-            content = yaml.safe_load(f)
-            if isinstance(content, dict) and "project_name" in content:
-                project_name = content["project_name"]
-                if isinstance(project_name, str) and project_name.strip():
-                    return project_name.strip()
-    except Exception:
-        pass
-    return None
-
-
 def setup_project_name(force: bool = False) -> tuple[str, Path, NaoConfig | None]:
     """Setup the project name. Returns existing config if found and user wants to extend."""
     # Check if we're in a directory with an existing nao_config.yaml
@@ -57,31 +39,23 @@ def setup_project_name(force: bool = False) -> tuple[str, Path, NaoConfig | None
     config_file = current_dir / "nao_config.yaml"
 
     if config_file.exists():
-        # Load existing config to get project name
-        existing_config = NaoConfig.try_load(current_dir)
-        if existing_config:
-            UI.title("Found existing nao_config.yaml")
-            UI.print(f"[dim]Project: {existing_config.project_name}[/dim]\n")
+        try:
+            existing_config = NaoConfig.try_load(current_dir, raise_on_error=True)
+        except NaoConfigError as e:
+            raise InitError(
+                f"Found invalid nao_config.yaml.\n{e}\n\nFix the configuration file and rerun `nao init`."
+            ) from e
 
-            if force or ask_confirm("Update this project configuration?", default=True):
-                return existing_config.project_name, current_dir, existing_config
-            else:
-                raise InitError("Initialization cancelled.")
-        else:
-            # Config file exists but is invalid
-            UI.title("Found invalid nao_config.yaml")
-            UI.print("[yellow]The existing configuration file has errors and couldn't be loaded.[/yellow]\n")
+        if not existing_config:
+            raise InitError("Failed to load existing nao_config.yaml.")
 
-            if force or ask_confirm("Fix this project configuration?", default=True):
-                # Extract project name from the invalid config
-                project_name = _extract_project_name_from_file(config_file)
-                if not project_name:
-                    project_name = ask_text("Enter your project name:", required_field=True)
-                    if not project_name:
-                        raise EmptyProjectNameError()
-                return project_name, current_dir, None
-            else:
-                raise InitError("Initialization cancelled.")
+        UI.title("Found existing nao_config.yaml")
+        UI.print(f"[dim]Project: {existing_config.project_name}[/dim]\n")
+
+        if force or ask_confirm("Update this project configuration?", default=True):
+            return existing_config.project_name, current_dir, existing_config
+
+        raise InitError("Initialization cancelled.")
 
     # Normal flow: prompt for project name
     project_name = ask_text("Enter your project name:", required_field=True)
@@ -204,3 +178,4 @@ def init(
 
     except InitError as e:
         UI.error(str(e))
+        raise SystemExit(1) from e

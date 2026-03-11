@@ -50,15 +50,15 @@ def format_validation_error(error: Any, config_class: type[Any]) -> str:
     loc_parts = list(error.get("loc", []))
     msg = error.get("msg", "unknown error")
     error_type = error.get("type", "")
-    
+
     # Build the field path
     if loc_parts:
         field_path = " → ".join(str(p) for p in loc_parts)
     else:
         field_path = "config"
-        
+
     # Check if this is an "extra fields not permitted" error (wrong field name)
-    if error_type == "missing" and loc_parts:
+    if error_type in ("extra_forbidden", "value_error.extra", "missing") and loc_parts:
         field_name = str(loc_parts[-1])
         valid_fields = get_valid_fields(config_class)
         suggestions = suggest_similar_fields(field_name, valid_fields)

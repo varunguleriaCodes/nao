@@ -247,7 +247,7 @@ class NaoConfig(BaseModel):
             # Documentation Link
             f.write("# Configuration documentation:\n")
             f.write("# https://docs.getnao.io/nao-agent/context-builder/configuration#nao_config-yaml\n\n")
-            
+
             yaml.dump(
                 self.model_dump(mode="json", by_alias=True, exclude_none=True),
                 f,
@@ -327,7 +327,9 @@ class NaoConfig(BaseModel):
 
             # Add warning about missing env vars if any
             if cls._missing_env_vars:
-                env_var_warnings = "\n  • ".join(f"{k} (environment variable not set or empty)" for k in cls._missing_env_vars.keys())
+                env_var_warnings = "\n  • ".join(
+                    f"{k} (environment variable not set or empty)" for k in cls._missing_env_vars.keys()
+                )
                 msg += f"\n\nWarning: Missing or empty environment variables:\n  • {env_var_warnings}"
 
             handle_error(msg)

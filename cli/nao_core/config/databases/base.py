@@ -158,7 +158,10 @@ class DatabaseConfig(BaseModel, ABC):
         except Exception as e:
             error_msg = str(e)
             empty_creds = self._get_empty_credentials()
-            if empty_creds and any(keyword in error_msg.lower() for keyword in ("auth", "password", "credentials", "forbidden", "401", "403", "permission")):
+            if empty_creds and any(
+                keyword in error_msg.lower()
+                for keyword in ("auth", "password", "credentials", "forbidden", "401", "403", "permission")
+            ):
                 creds_list = ", ".join(f"'{c}'" for c in empty_creds)
                 return False, f"{error_msg} (check if environment variables for {creds_list} are set and non-empty)"
             return False, error_msg
