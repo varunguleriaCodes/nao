@@ -12,7 +12,7 @@ import * as projectQueries from '../queries/project.queries';
 import { SlackConfig } from '../queries/project-slack-config.queries';
 import { get as getUser } from '../queries/user.queries';
 import { UIChat, UIMessage, UIMessagePart } from '../types/chat';
-import { ConversationContext, StreamState, ToolCallEntry } from '../types/slack';
+import { ConversationContext, StreamState, ToolCallEntry } from '../types/messaging-provider';
 import { createChatTitle } from '../utils/ai';
 import {
 	createCompletionCard,
@@ -23,9 +23,11 @@ import {
 	createSummaryToolCalls,
 	createTextBlock,
 	escapeCsvCell,
+	EXCLUDED_TOOLS,
 	FEEDBACK_MODAL_CALLBACK_ID,
-} from '../utils/slack';
-import { agentService } from './agent';
+} from '../utils/messaging-provider';
+import { agentService, ModelSelection } from './agent';
+import { posthog, PostHogEvent } from './posthog';
 
 const UPDATE_INTERVAL_MS = 200;
 
@@ -34,32 +36,46 @@ class SlackService {
 	private _slackClient: WebClient | null = null;
 	private _projectId: string = '';
 	private _redirectUrl: string = '';
-	private _initialized: boolean = false;
+	private _currentBotToken: string = '';
+	private _currentSigningSecret: string = '';
+	private _modelSelection: ModelSelection | undefined = undefined;
 	private _lastCompletionCard: Map<string, { card: SentMessage; chatUrl: string }> = new Map();
 
 	constructor() {}
 
-	public getWebhooks(slackConfig: SlackConfig) {
-		this._initialize(slackConfig);
+	public getWebhooks(config: SlackConfig) {
+		if (this._configChanged(config)) {
+			this._initialize(config);
+		}
 		return this._bot?.webhooks;
 	}
 
-	private _initialize(slackConfig: SlackConfig): void {
-		if (this._initialized) {
-			return;
-		}
-		this._initialized = true;
+	private _configChanged(config: SlackConfig): boolean {
+		return (
+			this._currentBotToken !== config.botToken ||
+			this._currentSigningSecret !== config.signingSecret ||
+			this._projectId !== config.projectId ||
+			this._redirectUrl !== config.redirectUrl ||
+			this._modelSelection?.provider !== config.modelSelection?.provider ||
+			this._modelSelection?.modelId !== config.modelSelection?.modelId
+		);
+	}
 
-		this._projectId = slackConfig.projectId;
-		this._redirectUrl = slackConfig.redirectUrl;
-		this._slackClient = new WebClient(slackConfig.botToken);
+	private _initialize(config: SlackConfig): void {
+		this._currentBotToken = config.botToken;
+		this._currentSigningSecret = config.signingSecret;
+
+		this._projectId = config.projectId;
+		this._redirectUrl = config.redirectUrl;
+		this._modelSelection = config.modelSelection;
+		this._slackClient = new WebClient(config.botToken);
 
 		this._bot = new Chat({
 			userName: 'nao-chat',
 			adapters: {
 				slack: createSlackAdapter({
-					botToken: slackConfig.botToken,
-					signingSecret: slackConfig.signingSecret,
+					botToken: config.botToken,
+					signingSecret: config.signingSecret,
 				}),
 			},
 			state: createMemoryState(),
@@ -75,19 +91,19 @@ class SlackService {
 		});
 
 		this._bot.onAction('stop_generation', async (event) => {
-			const existingChat = await chatQueries.getChatBySlackThread(event.thread.id);
+			const existingChat = await chatQueries.getChatBySlackThread(event.thread!.id);
 			if (existingChat) {
 				agentService.get(existingChat.id)?.stop();
 			}
 		});
 
 		this._bot.onAction('feedback_positive', async (event) => {
-			const messageId = await this._getLastAssistantMessageId(event.thread.id);
+			const messageId = await this._getLastAssistantMessageId(event.thread!.id);
 			if (!messageId) {
 				return;
 			}
 			await feedbackQueries.upsertFeedback({ messageId, vote: 'up' });
-			const completion = this._lastCompletionCard.get(event.thread.id);
+			const completion = this._lastCompletionCard.get(event.thread!.id);
 			if (completion) {
 				await completion.card.edit(createCompletionCard(completion.chatUrl, 'up'));
 			}
@@ -96,7 +112,7 @@ class SlackService {
 		this._bot.onAction('feedback_negative', async (event) => {
 			await event.openModal({
 				...createFeedbackModal(),
-				privateMetadata: event.thread.id,
+				privateMetadata: event.thread!.id,
 			});
 		});
 
@@ -121,7 +137,8 @@ class SlackService {
 			}
 
 			const slackUserId = event.user?.userId;
-			const email = slackUserId ? await this._getSlackUserEmail(slackUserId) : null;
+			const slackUser = slackUserId ? await this._getSlackUser(slackUserId) : null;
+			const email = slackUser?.profile?.email || null;
 			const user = email ? await getUser({ email }) : null;
 
 			if (ownerId !== user?.id) {
@@ -153,6 +170,9 @@ class SlackService {
 			blocks: [],
 			textBlockIndex: -1,
 			assistantMessage: null,
+			isNewChat: false,
+			modelId: undefined,
+			timezone: undefined,
 		};
 
 		await this._validateUserAccess(ctx);
@@ -169,8 +189,9 @@ class SlackService {
 			await this._handleStreamAgent(chat, ctx);
 		} catch (error) {
 			const errorMessage = `❌ An error occurred while processing your message. ${error instanceof Error ? error.message : 'Unknown error'}.`;
+			ctx.blocks.push(createTextBlock(errorMessage));
 			if (ctx.convMessage) {
-				await ctx.convMessage.edit(errorMessage);
+				await ctx.convMessage.edit(Card({ children: ctx.blocks }));
 			} else {
 				await ctx.thread.post(errorMessage);
 			}
@@ -184,7 +205,8 @@ class SlackService {
 
 	private async _getUser(ctx: ConversationContext): Promise<void> {
 		const slackUserId = ctx.userMessage.author.userId;
-		const email = await this._getSlackUserEmail(slackUserId);
+		const slackUser = await this._getSlackUser(slackUserId);
+		const email = slackUser?.profile?.email || null;
 
 		if (!email) {
 			throw new Error('Could not retrieve user email from Slack');
@@ -198,11 +220,12 @@ class SlackService {
 			throw new Error('User not found');
 		}
 		ctx.user = user;
+		ctx.timezone = slackUser?.tz || undefined;
 	}
 
-	private async _getSlackUserEmail(userId: string): Promise<string | null> {
-		const userProfile = await this._slackClient?.users.profile.get({ user: userId });
-		return userProfile?.profile?.email || null;
+	private async _getSlackUser(userId: string) {
+		const response = await this._slackClient?.users.info({ user: userId });
+		return response?.user || null;
 	}
 
 	private async _checkUserBelongsToProject(ctx: ConversationContext): Promise<void> {
@@ -227,6 +250,7 @@ class SlackService {
 				source: 'slack',
 			});
 			ctx.chatId = existingChat.id;
+			ctx.isNewChat = false;
 		} else {
 			const title = createChatTitle({ text });
 			const [createdChat] = await chatQueries.createChat(
@@ -234,6 +258,7 @@ class SlackService {
 				{ text, source: 'slack' },
 			);
 			ctx.chatId = createdChat.id;
+			ctx.isNewChat = true;
 		}
 	}
 
@@ -249,14 +274,25 @@ class SlackService {
 		const chatUrl = new URL(ctx.chatId, this._redirectUrl).toString();
 		const card = await ctx.thread.post(createCompletionCard(chatUrl));
 		this._lastCompletionCard.set(ctx.thread.id, { card, chatUrl });
+
+		posthog.capture(ctx.user!.id, PostHogEvent.MessageSent, {
+			project_id: this._projectId,
+			chat_id: ctx.chatId,
+			model_id: ctx.modelId,
+			is_new_chat: ctx.isNewChat,
+			source: 'slack',
+		});
 	}
 
 	private async _createAgentStream(
 		chat: UIChat,
 		ctx: ConversationContext,
 	): Promise<ReadableStream<InferUIMessageChunk<UIMessage>>> {
-		const agent = await agentService.create({ ...chat, userId: ctx.user!.id, projectId: this._projectId });
-		return agent.stream(chat.messages, { isSlack: true });
+		const agent = await agentService.create(
+			{ ...chat, userId: ctx.user!.id, projectId: this._projectId },
+			this._modelSelection,
+		);
+		return agent.stream(chat.messages, { provider: 'slack', timezone: ctx.timezone });
 	}
 
 	private async _readStreamAndUpdateSlackMessage(
@@ -278,7 +314,7 @@ class SlackService {
 			if (!part) {
 				continue;
 			}
-			if (part.type.startsWith('tool-') && part.type !== 'tool-suggest_follow_ups') {
+			if (part.type.startsWith('tool-') && !EXCLUDED_TOOLS.includes(part.type)) {
 				await this._handleCollapsibleToolPart(
 					part as Extract<UIMessagePart, { toolCallId: string }>,
 					state,

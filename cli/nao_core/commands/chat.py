@@ -193,12 +193,9 @@ def chat(port: Annotated[Optional[int], Parameter(name=["-p", "--port"])] = None
                 if config.llm.secret_key:
                     env["AWS_SECRET_ACCESS_KEY"] = config.llm.secret_key
                     console.print("[bold green]✓[/bold green] Set AWS_SECRET_ACCESS_KEY from config")
-
-        # Set Slack config if available
-        if config and config.slack:
-            env["SLACK_BOT_TOKEN"] = config.slack.bot_token
-            env["SLACK_SIGNING_SECRET"] = config.slack.signing_secret
-            console.print("[bold green]✓[/bold green] Set Slack environment variables from config")
+                if config.llm.aws_region:
+                    env["AWS_REGION"] = config.llm.aws_region
+                    console.print("[bold green]✓[/bold green] Set AWS_REGION from config")
 
         env["NAO_DEFAULT_PROJECT_PATH"] = str(Path.cwd())
         if "BETTER_AUTH_URL" not in os.environ:

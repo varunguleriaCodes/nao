@@ -64,6 +64,30 @@ export function generateDateSeries(granularity: Granularity): string[] {
 	return dates;
 }
 
+export function resolveTimezone(timezone?: string): string {
+	if (!timezone) {
+		return 'UTC';
+	}
+	try {
+		Intl.DateTimeFormat(undefined, { timeZone: timezone });
+		return timezone;
+	} catch {
+		return 'UTC';
+	}
+}
+
+export function formatCurrentDate(timezone?: string): string {
+	const tz = resolveTimezone(timezone);
+	const formatted = new Date().toLocaleDateString('en-US', {
+		weekday: 'long',
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+		timeZone: tz,
+	});
+	return tz === 'UTC' ? `${formatted} (UTC)` : `${formatted} (${tz})`;
+}
+
 export function fillMissingDates(records: UsageRecord[], granularity: Granularity): UsageRecord[] {
 	const dateSet = new Map(records.map((r) => [r.date, r]));
 	const allDates = generateDateSeries(granularity);
@@ -73,6 +97,8 @@ export function fillMissingDates(records: UsageRecord[], granularity: Granularit
 			dateSet.get(date) ?? {
 				date,
 				messageCount: 0,
+				webMessageCount: 0,
+				slackMessageCount: 0,
 				inputNoCacheTokens: 0,
 				inputCacheReadTokens: 0,
 				inputCacheWriteTokens: 0,
